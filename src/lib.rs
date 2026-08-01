@@ -748,7 +748,29 @@ fn write_file_durably(path: &Path, data: &[u8]) -> std::io::Result<()> {
 /// can distinguish "nothing left to make durable" (the directory is gone) from
 /// a real failure it must keep pending and report.
 fn sync_dir(dir: &Path) -> std::io::Result<()> {
-    File::open(dir)?.sync_all()
+    #[cfg(windows)]
+    {
+        use std::fs::OpenOptions;
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Foundation::GENERIC_WRITE;
+        use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+
+        // `File::open` requests read access, but Windows FlushFileBuffers
+        // requires a handle opened with write access. Directories also require
+        // FILE_FLAG_BACKUP_SEMANTICS when CreateFile opens them. Preserve the
+        // standard library's default share mode so a durability barrier does
+        // not turn into an unintended delete/rename lock.
+        let mut options = OpenOptions::new();
+        let directory = options
+            .access_mode(GENERIC_WRITE)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+            .open(dir)?;
+        directory.sync_all()
+    }
+    #[cfg(not(windows))]
+    {
+        File::open(dir)?.sync_all()
+    }
 }
 
 #[cfg(test)]
@@ -759,6 +781,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = BlobStore::new(dir.path().join("objects")).unwrap();
         (dir, store)
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn directory_barrier_opens_a_flushable_windows_handle() {
+        let directory = tempfile::tempdir().unwrap();
+        sync_dir(directory.path())
+            .expect("a CreateFile directory handle with write access must flush on Windows");
     }
 
     #[test]
