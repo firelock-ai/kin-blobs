@@ -749,7 +749,7 @@ fn write_file_durably(path: &Path, data: &[u8]) -> std::io::Result<()> {
 /// a real failure it must keep pending and report.
 fn sync_dir(dir: &Path) -> std::io::Result<()> {
     #[cfg(windows)]
-    {
+    let directory = {
         use std::fs::OpenOptions;
         use std::os::windows::fs::OpenOptionsExt;
         use windows_sys::Win32::Foundation::GENERIC_WRITE;
@@ -761,16 +761,28 @@ fn sync_dir(dir: &Path) -> std::io::Result<()> {
         // standard library's default share mode so a durability barrier does
         // not turn into an unintended delete/rename lock.
         let mut options = OpenOptions::new();
-        let directory = options
+        options
             .access_mode(GENERIC_WRITE)
             .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
-            .open(dir)?;
-        directory.sync_all()
-    }
+            .open(dir)?
+    };
     #[cfg(not(windows))]
-    {
-        File::open(dir)?.sync_all()
+    let directory = File::open(dir)?;
+
+    // `FILE_FLAG_BACKUP_SEMANTICS` also permits opening an ordinary file on
+    // Windows. A path that stopped being a directory is not a successful
+    // namespace barrier: accepting it would let every missing child barrier be
+    // mistaken for a pruned shard. Reject the wrong object before flushing.
+    if !directory.metadata()?.is_dir() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotADirectory,
+            format!(
+                "directory durability barrier target is not a directory: {}",
+                dir.display()
+            ),
+        ));
     }
+    directory.sync_all()
 }
 
 #[cfg(test)]
