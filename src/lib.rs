@@ -348,8 +348,11 @@ impl BlobStore {
             let shard_dir = self.root.join(&shard);
             match sync_dir(&shard_dir) {
                 Ok(()) => {}
-                // Pruned by compaction, or removed with the store root.
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                // Pruned by compaction, or removed with the store root. A
+                // failed root barrier makes `NotFound` ambiguous on Windows:
+                // walking through an ordinary file is reported as not found,
+                // so retain every shard until the root itself is known-good.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound && !root_unsynced => {}
                 Err(e) => {
                     if first_error.is_none() {
                         first_error = Some(BlobError::io(&shard_dir, e));
