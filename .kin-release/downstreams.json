@@ -1,6 +1,6 @@
 {
   "downstreams": [
-    { "repo": "firelock-ai/kin-model" },
-    { "repo": "firelock-ai/kin" }
+    { "repo": "kinlab-ai/kin-model" },
+    { "repo": "kinlab-ai/kin" }
   ]
 }
